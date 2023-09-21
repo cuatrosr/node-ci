@@ -1,0 +1,87 @@
+# This is a basic workflow to help you get started with Actions
+name: CI
+
+# Controls when the action will run.
+on:
+  # Triggers the workflow on push or pull request events but only for the main branch
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build-and-push-images"
+  build-and-push-images:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executes as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      # We need QEMU and Buildx so we can build multiple platforms later
+      - name: Docker Setup QEMU
+        uses: docker/setup-qemu-action@v3.0.0
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3.0.0
+
+      - name: Cache Docker Layers
+        uses: actions/cache@v3.3.2
+        with:
+          # A list of files, directories, and wildcard patterns to cache and restore
+          path: /tmp/.buildx-cache
+          # An explicit key for restoring and saving the cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          # An ordered list of keys to use for restoring stale cache if no cache hit occurred for key. Note `cache-hit` returns false in this case.
+          restore-keys: ${{ runner.os }}-buildx-
+
+      - name: Login to DockerHub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3.0.0
+        with:
+          # Username used to log against the Docker registry
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          # Password or personal access token used to log against the Docker registry
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker Metadata action
+        id: docker_meta
+        uses: docker/metadata-action@v5.0.0
+        with:
+          # List of Docker images to use as base name for tags
+          images: cuatrosr/node-ci
+          # List of tags as key-value pair attributes
+          tags: type=raw,value=latest
+          # Flavors to apply
+          flavor: latest=false
+
+      - name: Build and push Docker images
+        id: docker_build
+        uses: docker/build-push-action@v5.0.0
+        with:
+          # Builder instance
+          builder: ${{ steps.buildx.outputs.name }}
+          # List of external cache sources for buildx
+          cache-from: type=local,src=/tmp/.buildx-cache
+          # List of cache export destinations for buildx
+          cache-to: type=local,dest=/tmp/.buildx-cache
+          # List of metadata for an image
+          labels: ${{ steps.docker_meta.outputs.tags }}
+          # List of target platforms for build
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          # Push is a shorthand for --output=type=registry
+          # don't push during a pull_request, only build
+          push: ${{ github.event_name != 'pull_request' }}
+          # List of tags
+          tags: ${{ steps.docker_meta.outputs.tags }}
+
+      - name: Show image digest
+        run: echo ${{ steps.docker_build.outputs.digest }}
